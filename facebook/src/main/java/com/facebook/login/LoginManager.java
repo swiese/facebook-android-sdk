@@ -29,7 +29,6 @@ import android.content.Context;
 import android.support.v4.app.Fragment;
 
 import com.facebook.AccessToken;
-import com.facebook.AccessTokenSource;
 import com.facebook.CallbackManager;
 import com.facebook.FacebookActivity;
 import com.facebook.FacebookAuthorizationException;
@@ -180,7 +179,7 @@ public class LoginManager {
         boolean isCanceled = false;
         if (data != null) {
             LoginClient.Result result =
-                    (LoginClient.Result) data.getParcelableExtra(LoginFragment.RESULT_KEY);
+                    data.getParcelableExtra(LoginFragment.RESULT_KEY);
             if (result != null) {
                 originalRequest = result.request;
                 code = result.code;
@@ -518,22 +517,18 @@ public class LoginManager {
     private boolean resolveIntent(Intent intent) {
         ResolveInfo resolveInfo = FacebookSdk.getApplicationContext().getPackageManager()
             .resolveActivity(intent, 0);
-        if (resolveInfo == null) {
-            return false;
-        }
-        return true;
+        return resolveInfo != null;
     }
 
-    private Intent getFacebookActivityIntent(LoginClient.Request request) {
+    protected Intent getFacebookActivityIntent(LoginClient.Request request) {
         Intent intent = new Intent();
         intent.setClass(FacebookSdk.getApplicationContext(), FacebookActivity.class);
         intent.setAction(request.getLoginBehavior().toString());
 
         // Let FacebookActivity populate extras appropriately
-        LoginClient.Request authClientRequest = request;
         Bundle extras = new Bundle();
         extras.putParcelable(LoginFragment.EXTRA_REQUEST, request);
-        intent.putExtras(extras);
+        intent.putExtra(LoginFragment.REQUEST_KEY, extras);
 
         return intent;
     }
@@ -582,17 +577,6 @@ public class LoginManager {
                 callback.onSuccess(loginResult);
             }
         }
-    }
-
-    public static void setSuccessResult(Intent intent, Bundle values) {
-        LoginClient.Request request = intent.getExtras().getParcelable(LoginFragment.EXTRA_REQUEST);
-        AccessToken token = LoginMethodHandler.createAccessTokenFromWebBundle(
-                request.getPermissions(),
-                values,
-                AccessTokenSource.CUSTOM_TAB,
-                request.getApplicationId());
-        LoginClient.Result result = LoginClient.Result.createTokenResult(request, token);
-        intent.putExtra(LoginFragment.RESULT_KEY, result);
     }
 
     private static class ActivityStartActivityDelegate implements StartActivityDelegate {

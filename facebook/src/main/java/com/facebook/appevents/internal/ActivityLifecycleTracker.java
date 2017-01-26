@@ -22,16 +22,15 @@ package com.facebook.appevents.internal;
 
 import android.app.Activity;
 import android.app.Application;
+import android.content.Context;
 import android.os.Bundle;
-import android.os.Looper;
 import android.util.Log;
 
-import com.facebook.BuildConfig;
 import com.facebook.FacebookSdk;
 import com.facebook.appevents.AppEventsLogger;
+import com.facebook.internal.FetchedAppSettings;
+import com.facebook.internal.FetchedAppSettingsManager;
 import com.facebook.internal.Utility;
-
-import junit.framework.Assert;
 
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -55,6 +54,7 @@ public class ActivityLifecycleTracker {
     private static volatile SessionInfo currentSession;
     private static AtomicBoolean tracking = new AtomicBoolean(false);
     private static String appId;
+    private static long currentActivityAppearTime;
 
     public static void startTracking(Application application, final String appId) {
         if (!tracking.compareAndSet(false, true)) {
@@ -69,7 +69,7 @@ public class ActivityLifecycleTracker {
                     public void onActivityCreated(
                             final Activity activity,
                             Bundle savedInstanceState) {
-                        assertIsMainThread();
+                        AppEventUtility.assertIsMainThread();
                         ActivityLifecycleTracker.onActivityCreated(activity);
                     }
 
@@ -78,13 +78,13 @@ public class ActivityLifecycleTracker {
 
                     @Override
                     public void onActivityResumed(final Activity activity) {
-                        assertIsMainThread();
+                        AppEventUtility.assertIsMainThread();
                         ActivityLifecycleTracker.onActivityResumed(activity);
                     }
 
                     @Override
                     public void onActivityPaused(final Activity activity) {
-                        assertIsMainThread();
+                        AppEventUtility.assertIsMainThread();
                         ActivityLifecycleTracker.onActivityPaused(activity);
                     }
 
@@ -112,8 +112,12 @@ public class ActivityLifecycleTracker {
     }
 
     // Public in order to allow unity sdk to correctly log app events
-    public static void onActivityCreated(final Activity activity) {
+    public static void onActivityCreated(Activity activity) {
         final long currentTime = System.currentTimeMillis();
+        final Context applicationContext = activity.getApplicationContext();
+        final String activityName = Utility.getActivityName(activity);
+        final SourceApplicationInfo sourceApplicationInfo =
+                SourceApplicationInfo.Factory.create(activity);
         Runnable handleActivityCreate = new Runnable() {
             @Override
             public void run() {
@@ -122,17 +126,18 @@ public class ActivityLifecycleTracker {
                             SessionInfo.getStoredSessionInfo();
                     if (lastSession != null) {
                         SessionLogger.logDeactivateApp(
-                                activity,
+                                applicationContext,
+                                activityName,
                                 lastSession,
                                 appId);
                     }
 
                     currentSession = new SessionInfo(currentTime, null);
-                    SourceApplicationInfo sourceApplicationInfo =
-                            SourceApplicationInfo.Factory.create(activity);
+
                     currentSession.setSourceApplicationInfo(sourceApplicationInfo);
                     SessionLogger.logActivateApp(
-                            activity,
+                            applicationContext,
+                            activityName,
                             sourceApplicationInfo,
                             appId);
                 }
@@ -141,18 +146,22 @@ public class ActivityLifecycleTracker {
         singleThreadExecutor.execute(handleActivityCreate);
     }
 
-    private static void onActivityResumed(final Activity activity) {
+    // Public in order to allow unity sdk to correctly log app events
+    public static void onActivityResumed(Activity activity) {
         foregroundActivityCount.incrementAndGet();
         cancelCurrentTask();
         final long currentTime = System.currentTimeMillis();
+        ActivityLifecycleTracker.currentActivityAppearTime = currentTime;
+        final Context applicationContext = activity.getApplicationContext();
+        final String activityName = Utility.getActivityName(activity);
         Runnable handleActivityResume = new Runnable() {
             @Override
             public void run() {
-                activity.getCallingActivity();
                 if (currentSession == null) {
                     currentSession = new SessionInfo(currentTime, null);
                     SessionLogger.logActivateApp(
-                            activity,
+                            applicationContext,
+                            activityName,
                             null,
                             appId);
                 } else if (currentSession.getSessionLastEventTime() != null) {
@@ -162,11 +171,13 @@ public class ActivityLifecycleTracker {
                         // We were suspended for a significant amount of time.
                         // Count this as a new session and log the old session
                         SessionLogger.logDeactivateApp(
-                                activity,
+                                applicationContext,
+                                activityName,
                                 currentSession,
                                 appId);
                         SessionLogger.logActivateApp(
-                                activity,
+                                applicationContext,
+                                activityName,
                                 null,
                                 appId);
                         currentSession = new SessionInfo(currentTime, null);
@@ -183,7 +194,7 @@ public class ActivityLifecycleTracker {
         singleThreadExecutor.execute(handleActivityResume);
     }
 
-    private static void onActivityPaused(final Activity activity) {
+    private static void onActivityPaused(Activity activity) {
         int count = foregroundActivityCount.decrementAndGet();
         if (count < 0) {
             // Our ref count can be off if a developer doesn't call activate
@@ -195,6 +206,10 @@ public class ActivityLifecycleTracker {
 
         cancelCurrentTask();
         final long currentTime = System.currentTimeMillis();
+
+        // Pull out this information now to avoid holding a reference to the activity
+        final Context applicationContext = activity.getApplicationContext();
+        final String activityName = Utility.getActivityName(activity);
 
         Runnable handleActivityPaused = new Runnable() {
             @Override
@@ -215,12 +230,15 @@ public class ActivityLifecycleTracker {
                         public void run() {
                             if (foregroundActivityCount.get() <= 0) {
                                 SessionLogger.logDeactivateApp(
-                                        activity,
+                                        applicationContext,
+                                        activityName,
                                         currentSession,
                                         appId);
                                 SessionInfo.clearSavedSessionFromDisk();
                                 currentSession = null;
                             }
+
+                            currentFuture = null;
                         }
                     };
                     currentFuture = singleThreadExecutor.schedule(
@@ -230,6 +248,15 @@ public class ActivityLifecycleTracker {
 
                 }
 
+                long appearTime = ActivityLifecycleTracker.currentActivityAppearTime;
+                long timeSpentOnActivityInSeconds =  appearTime > 0
+                        ? (currentTime - appearTime) / 1000
+                        : 0;
+                AutomaticAnalyticsLogger.logActivityTimeSpentEvent(
+                        activityName,
+                        timeSpentOnActivityInSeconds
+                );
+
                 currentSession.writeSessionToDisk();
             }
         };
@@ -237,8 +264,8 @@ public class ActivityLifecycleTracker {
     }
 
     private static int getSessionTimeoutInSeconds() {
-        Utility.FetchedAppSettings settings =
-                Utility.getAppSettingsWithoutQuery(FacebookSdk.getApplicationId());
+        FetchedAppSettings settings =
+                FetchedAppSettingsManager.getAppSettingsWithoutQuery(FacebookSdk.getApplicationId());
         if (settings == null) {
             return Constants.getDefaultAppEventsSessionTimeoutInSeconds();
         }
@@ -252,14 +279,5 @@ public class ActivityLifecycleTracker {
         }
 
         currentFuture = null;
-    }
-
-    private static void assertIsMainThread() {
-        if (BuildConfig.DEBUG){
-            boolean isMainThread = Looper.myLooper() == Looper.getMainLooper();
-            Assert.assertTrue(
-                    "Activity Lifecycle Callback not runnin on main thread",
-                    isMainThread);
-        }
     }
 }
