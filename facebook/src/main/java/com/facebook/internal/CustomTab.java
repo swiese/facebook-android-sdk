@@ -27,8 +27,9 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.support.customtabs.CustomTabsIntent;
 
+import com.facebook.FacebookSdk;
+
 public class CustomTab {
-    private static final String CHROME_PACKAGE = "com.android.chrome";
 
     private Uri uri;
 
@@ -38,13 +39,14 @@ public class CustomTab {
         }
         uri = Utility.buildUri(
                 ServerProtocol.getDialogAuthority(),
-                ServerProtocol.getAPIVersion() + "/" + ServerProtocol.DIALOG_PATH + action,
+                FacebookSdk.getGraphApiVersion() + "/" + ServerProtocol.DIALOG_PATH + action,
                 parameters);
     }
 
-    public void openCustomTab(Activity activity) {
+    public void openCustomTab(Activity activity, String packageName) {
         CustomTabsIntent customTabsIntent = new CustomTabsIntent.Builder().build();
-        customTabsIntent.intent.setPackage(CHROME_PACKAGE);
+        customTabsIntent.intent.setPackage(packageName);
+        customTabsIntent.intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
         customTabsIntent.launchUrl(activity, uri);
     }
 }

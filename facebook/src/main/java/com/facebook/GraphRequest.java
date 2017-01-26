@@ -257,7 +257,7 @@ public class GraphRequest {
         }
 
         if (this.version == null) {
-            this.version = ServerProtocol.getAPIVersion();
+            this.version = FacebookSdk.getGraphApiVersion();
         }
     }
 
@@ -541,6 +541,10 @@ public class GraphRequest {
             parameters.putAll(params);
         }
         parameters.putParcelable(PICTURE_PARAM, photoUri);
+
+        if (caption != null && !caption.isEmpty()) {
+            parameters.putString(CAPTION_PARAM, caption);
+        }
 
         return new GraphRequest(accessToken, graphPath, parameters, HttpMethod.POST, callback);
     }
@@ -1442,7 +1446,7 @@ public class GraphRequest {
     }
 
     private String appendParametersToBaseUrl(String baseUrl) {
-        Uri.Builder uriBuilder = new Uri.Builder().encodedPath(baseUrl);
+        Uri.Builder uriBuilder = Uri.parse(baseUrl).buildUpon();
 
         Set<String> keys = this.parameters.keySet();
         for (String key : keys) {
@@ -1471,14 +1475,18 @@ public class GraphRequest {
         return uriBuilder.toString();
     }
 
-    final String getUrlForBatchedRequest() {
+    final String getRelativeUrlForBatchedRequest() {
         if (overriddenURL != null) {
             throw new FacebookException("Can't override URL for a batch request");
         }
 
-        String baseUrl = getGraphPathWithVersion();
+        String baseUrl =
+                String.format("%s/%s", ServerProtocol.getGraphUrlBase(), getGraphPathWithVersion());
         addCommonParameters();
-        return appendParametersToBaseUrl(baseUrl);
+        String fullUrl = appendParametersToBaseUrl(baseUrl);
+        Uri uri = Uri.parse(fullUrl);
+        String relativeUrl = String.format("%s?%s", uri.getPath(), uri.getQuery());
+        return relativeUrl;
     }
 
     final String getUrlForSingleRequest() {
@@ -1542,7 +1550,7 @@ public class GraphRequest {
             batchEntry.put(BATCH_ENTRY_DEPENDS_ON_PARAM, this.batchEntryDependsOn);
         }
 
-        String relativeURL = getUrlForBatchedRequest();
+        String relativeURL = getRelativeUrlForBatchedRequest();
         batchEntry.put(BATCH_RELATIVE_URL_PARAM, relativeURL);
         batchEntry.put(BATCH_METHOD_PARAM, httpMethod);
         if (this.accessToken != null) {

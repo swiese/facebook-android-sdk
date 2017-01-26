@@ -24,8 +24,6 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.net.Uri;
-import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.support.v4.app.Fragment;
@@ -33,17 +31,13 @@ import android.support.v4.app.FragmentActivity;
 import android.text.TextUtils;
 
 import com.facebook.AccessToken;
-import com.facebook.GraphRequest;
-import com.facebook.GraphResponse;
-import com.facebook.appevents.AppEventsConstants;
 import com.facebook.FacebookException;
-import com.facebook.HttpMethod;
 import com.facebook.R;
+import com.facebook.appevents.AppEventsConstants;
 import com.facebook.internal.CallbackManagerImpl;
 import com.facebook.internal.Utility;
 import com.facebook.internal.Validate;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -51,7 +45,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -154,18 +147,28 @@ class LoginClient implements Parcelable {
         return false;
     }
 
-    private LoginMethodHandler [] getHandlersToTry(Request request) {
+    protected LoginMethodHandler [] getHandlersToTry(Request request) {
         ArrayList<LoginMethodHandler> handlers = new ArrayList<LoginMethodHandler>();
 
         final LoginBehavior behavior = request.getLoginBehavior();
 
-        if (behavior.allowsKatanaAuth()) {
+        if (behavior.allowsGetTokenAuth()) {
             handlers.add(new GetTokenLoginMethodHandler(this));
+        }
+
+        if (behavior.allowsKatanaAuth()) {
             handlers.add(new KatanaProxyLoginMethodHandler(this));
         }
 
-        if (behavior.allowsWebViewAuth()) {
+        if (behavior.allowsFacebookLiteAuth()) {
+            handlers.add(new FacebookLiteLoginMethodHandler(this));
+        }
+
+        if (behavior.allowsCustomTabAuth()) {
             handlers.add(new CustomTabLoginMethodHandler(this));
+        }
+
+        if (behavior.allowsWebViewAuth()) {
             handlers.add(new WebViewLoginMethodHandler(this));
         }
 
@@ -255,6 +258,8 @@ class LoginClient implements Parcelable {
         } else {
             // We didn't try it, so we don't get any other completion
             // notification -- log that we skipped it.
+            getLogger().logAuthorizationMethodNotTried(pendingRequest.getAuthId(),
+                    handler.getNameForLogging());
             addLoggingExtra(
                     LoginLogger.EVENT_EXTRAS_NOT_TRIED,
                     handler.getNameForLogging(),
@@ -329,7 +334,7 @@ class LoginClient implements Parcelable {
         AccessToken newToken = pendingResult.token;
 
         try {
-            Result result = null;
+            Result result;
             if (previousToken != null && newToken != null &&
                     previousToken.getUserId().equals(newToken.getUserId())) {
                 result = Result.createTokenResult(pendingRequest, pendingResult.token);
@@ -512,7 +517,7 @@ class LoginClient implements Parcelable {
             this.defaultAudience = enumValue != null ? DefaultAudience.valueOf(enumValue) : null;
             this.applicationId = parcel.readString();
             this.authId = parcel.readString();
-            this.isRerequest = parcel.readByte() != 0 ? true : false;
+            this.isRerequest = parcel.readByte() != 0;
             this.deviceRedirectUriString = parcel.readString();
         }
 

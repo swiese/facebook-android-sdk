@@ -20,11 +20,10 @@
 
 package com.facebook.appevents.internal;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 import android.text.format.DateUtils;
 
-import com.facebook.FacebookSdk;
 import com.facebook.LoggingBehavior;
 import com.facebook.appevents.AppEventsConstants;
 import com.facebook.appevents.AppEventsLogger;
@@ -59,7 +58,8 @@ class SessionLogger {
         };
 
     public static void logActivateApp(
-            Activity activity,
+            Context applicationContext,
+            String activityName,
             SourceApplicationInfo sourceApplicationInfo,
             String appId
     ) {
@@ -71,14 +71,19 @@ class SessionLogger {
         eventParams.putString(
                 AppEventsConstants.EVENT_PARAM_SOURCE_APPLICATION,
                 sourAppInfoStr);
-        AppEventsLogger.newLogger(
-                activity,
-                appId)
-                .logEvent(AppEventsConstants.EVENT_NAME_ACTIVATED_APP, eventParams);
+        AppEventsLogger logger = new InternalAppEventsLogger(
+                activityName,
+                appId,
+                null);
+        logger.logEvent(AppEventsConstants.EVENT_NAME_ACTIVATED_APP, eventParams);
+        if (logger.getFlushBehavior() != AppEventsLogger.FlushBehavior.EXPLICIT_ONLY) {
+          logger.flush();
+        }
     }
 
     public static void logDeactivateApp(
-            Activity activity,
+            Context applicationContext,
+            String activityName,
             SessionInfo sessionInfo,
             String appId) {
 
@@ -116,9 +121,10 @@ class SessionLogger {
         eventParams.putLong(Constants.LOG_TIME_APP_EVENT_KEY,
                 sessionInfo.getSessionLastEventTime() / 1000);
 
-        AppEventsLogger.newLogger(
-                activity,
-                appId)
+        new InternalAppEventsLogger(
+                activityName,
+                appId,
+                null)
                 .logEvent(
                     AppEventsConstants.EVENT_NAME_DEACTIVATED_APP,
                     (sessionLength / DateUtils.SECOND_IN_MILLIS),

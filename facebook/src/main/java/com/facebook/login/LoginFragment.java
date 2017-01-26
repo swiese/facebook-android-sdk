@@ -31,14 +31,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 
-import com.facebook.FacebookActivity;
-import com.facebook.FacebookOperationCanceledException;
 import com.facebook.R;
-import com.facebook.internal.ServerProtocol;
-import com.facebook.internal.Utility;
-
-import org.json.JSONException;
-import org.json.JSONObject;
 
 /**
  * This Fragment is a necessary part of the overall Facebook login process
@@ -49,6 +42,7 @@ import org.json.JSONObject;
 
 public class LoginFragment extends Fragment {
     static final String RESULT_KEY = "com.facebook.LoginFragment:Result";
+    static final String REQUEST_KEY = "com.facebook.LoginFragment:Request";
     static final String EXTRA_REQUEST = "request";
 
     private static final String TAG = "LoginFragment";
@@ -56,28 +50,19 @@ public class LoginFragment extends Fragment {
             "Cannot call LoginFragment with a null calling package. " +
                     "This can occur if the launchMode of the caller is singleInstance.";
     private static final String SAVED_LOGIN_CLIENT = "loginClient";
-    private static final String SAVED_CHALLENGE = "challenge";
-    private static final int CHALLENGE_LENGTH = 20;
 
     private String callingPackage;
     private LoginClient loginClient;
     private LoginClient.Request request;
-    private boolean restarted;
-    private String expectedChallenge;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        restarted = savedInstanceState != null;
-
         if (savedInstanceState != null) {
             loginClient = savedInstanceState.getParcelable(SAVED_LOGIN_CLIENT);
             loginClient.setFragment(this);
-            expectedChallenge = savedInstanceState.getString(SAVED_CHALLENGE);
         } else {
-            loginClient = new LoginClient(this);
-            expectedChallenge = Utility.generateRandomString(CHALLENGE_LENGTH);
+            loginClient = createLoginClient();
         }
 
         loginClient.setOnCompletedListener(new LoginClient.OnCompletedListener() {
@@ -95,12 +80,13 @@ public class LoginFragment extends Fragment {
         initializeCallingPackage(activity);
         if (activity.getIntent() != null) {
             Intent intent = activity.getIntent();
-            // Set the class loader explicitly to avoid a possible issue where the wrong
-            // class loader is used by android for unmarshalling LoginClient.Request on
-            // Samsung devices
-            intent.setExtrasClassLoader(LoginClient.Request.class.getClassLoader());
-            request = (LoginClient.Request)intent.getParcelableExtra(EXTRA_REQUEST);
+            Bundle bundle = intent.getBundleExtra(REQUEST_KEY);
+            request = bundle.getParcelable(EXTRA_REQUEST);
         }
+    }
+
+    protected LoginClient createLoginClient() {
+        return new LoginClient(this);
     }
 
     @Override
@@ -164,17 +150,6 @@ public class LoginFragment extends Fragment {
             return;
         }
 
-        if (restarted) {
-            Activity activity = getActivity();
-            if (activity instanceof FacebookActivity
-                    && loginClient.getCurrentHandler() instanceof CustomTabLoginMethodHandler) {
-                // custom tab was closed
-                ((FacebookActivity) activity)
-                        .sendResult(null, new FacebookOperationCanceledException());
-            }
-        }
-        restarted = true;
-
         loginClient.startOrContinueAuth(request);
     }
 
@@ -197,7 +172,6 @@ public class LoginFragment extends Fragment {
         super.onSaveInstanceState(outState);
 
         outState.putParcelable(SAVED_LOGIN_CLIENT, loginClient);
-        outState.putString(SAVED_CHALLENGE, expectedChallenge);
     }
 
     private void initializeCallingPackage(final Activity activity) {
@@ -206,24 +180,6 @@ public class LoginFragment extends Fragment {
             return;
         }
         callingPackage = componentName.getPackageName();
-    }
-
-    public boolean validateChallengeParam(Bundle values) {
-        try {
-            String stateString = values.getString(ServerProtocol.DIALOG_PARAM_STATE);
-            if (stateString == null) {
-                return false;
-            }
-            JSONObject state = new JSONObject(stateString);
-            String challenge = state.getString(LoginLogger.EVENT_PARAM_CHALLENGE);
-            return challenge.equals(expectedChallenge);
-        } catch (JSONException e) {
-            return false;
-        }
-    }
-
-    public String getChallengeParam() {
-        return expectedChallenge;
     }
 
     LoginClient getLoginClient() {
